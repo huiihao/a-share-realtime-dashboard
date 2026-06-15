@@ -195,7 +195,23 @@ THS_INDUSTRY_NAMES = {
 
 def load_industry_mapping():
     """从同花顺本地 industry.ini 加载行业→股票映射"""
-    ini_path = r"C:\同花顺软件\同花顺\industry.ini"
+    # 优先环境变量，否则使用默认安装路径
+    ini_path = os.environ.get(
+        "HEXIN_INDUSTRY_PATH",
+        os.path.join(os.environ.get("ProgramFiles", "C:/Program Files"),
+                     "同花顺软件/同花顺/industry.ini")
+    )
+    # 也检查常见安装位置
+    if not os.path.exists(ini_path):
+        alt_paths = [
+            r"D:\同花顺软件\同花顺\industry.ini",
+            r"C:\同花顺软件\同花顺\industry.ini",
+            os.path.join(os.path.dirname(__file__), "industry.ini"),
+        ]
+        for alt in alt_paths:
+            if os.path.exists(alt):
+                ini_path = alt
+                break
     if not os.path.exists(ini_path):
         return {}
     mapping = {}
