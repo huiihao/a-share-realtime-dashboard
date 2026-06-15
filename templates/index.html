@@ -159,7 +159,7 @@
 
     <!-- Turnover + Sectors -->
     <div class="panels-grid">
-        <div class="panel"><div class="panel-header"><span>成交额 <span style="color:var(--gold)">TOP</span></span><div class="panel-header-right"><span style="font-size:10px;color:var(--text-tertiary)">与涨幅榜同步</span></div></div><div class="panel-body" style="max-height:360px"><table><thead><tr><th>代码</th><th>名称</th><th>最新价</th><th>涨跌幅</th><th>成交额</th></tr></thead><tbody id="turnoverBody"><tr><td colspan="5"><div class="empty-state">加载中...</div></td></tr></tbody></table></div></div>
+        <div class="panel"><div class="panel-header"><span>成交额 <span style="color:var(--gold)">TOP</span></span><div class="panel-header-right"><select id="turnoverTop" onchange="onTurnoverChange()"><option value="10">TOP 10</option><option value="20">TOP 20</option><option value="50">TOP 50</option></select></div></div><div class="panel-body" style="max-height:360px"><table><thead><tr><th>代码</th><th>名称</th><th>最新价</th><th>涨跌幅</th><th>成交额</th></tr></thead><tbody id="turnoverBody"><tr><td colspan="5"><div class="empty-state">加载中...</div></td></tr></tbody></table></div></div>
         <div class="panel"><div class="panel-header"><span>行业板块</span><div class="panel-header-right"><select id="sectorInterval" onchange="onSectorIntervalChange()"><option value="300">5分钟</option><option value="600" selected>10分钟</option><option value="1800">30分钟</option></select></div></div><div class="panel-body" id="sectorsBody"><div class="empty-state">加载中...</div></div><div class="sector-footer"><span>独立刷新</span><span>·</span><span>更新:<span id="sectorTime">--</span></span><span>·</span><span id="sectorNext">--</span>秒后刷新</span></div></div>
     </div>
 </div>
@@ -174,7 +174,7 @@ toggle.addEventListener('click',()=>{const n=html.getAttribute('data-theme')==='
 
 // Config
 const INTERVAL={{refresh_sec}}*1000;
-let countdown=INTERVAL/1000,topN=20,source='sina',sectorIntervalSec=600,sectorCountdown=0,sectorTimeoutId=null,prevGainer=null;
+let countdown=INTERVAL/1000,topN=20,turnoverTopN=10,source='sina',sectorIntervalSec=600,sectorCountdown=0,sectorTimeoutId=null,prevGainer=null;
 
 // Utils
 const fp=v=>{const n=parseFloat(v);return isNaN(n)?'--':n.toFixed(2)};
@@ -188,10 +188,11 @@ setInterval(tick,1000);tick();
 // Source selector
 function onSourceChange(){source=document.getElementById('sourceSelect').value;fetchData()}
 function onTopChange(){topN=parseInt(document.getElementById('topSelect').value);fetchData()}
+function onTurnoverChange(){turnoverTopN=parseInt(document.getElementById('turnoverTop').value);fetchData()}
 function onSectorIntervalChange(){sectorIntervalSec=parseInt(document.getElementById('sectorInterval').value);sectorCountdown=0;fetchSectors()}
 
 // Data
-async function fetchData(){const t0=performance.now();try{const r=await fetch(`/api/full_snapshot?top=${topN}&source=${source}`);const d=await r.json();document.getElementById('requestTime').textContent=((performance.now()-t0)/1000).toFixed(1)+'s';if(d)renderMarket(d);countdown=INTERVAL/1000}catch(e){console.error(e)}}
+async function fetchData(){const t0=performance.now();const t=Math.max(topN,turnoverTopN);try{const r=await fetch(`/api/full_snapshot?top=${t}&source=${source}`);const d=await r.json();document.getElementById('requestTime').textContent=((performance.now()-t0)/1000).toFixed(1)+'s';if(d)renderMarket(d);countdown=INTERVAL/1000}catch(e){console.error(e)}}
 
 function renderMarket(d){
     const dot=document.getElementById('statusDot'),txt=document.getElementById('statusText');
@@ -206,9 +207,9 @@ function renderMarket(d){
     document.getElementById('mLimitDown').textContent=(b.limit_down??'--').toLocaleString();
     const ae=document.getElementById('mAvg');ae.textContent=pct(b.avg_pct);ae.style.color=(b.avg_pct||0)>0?'var(--up-color)':(b.avg_pct||0)<0?'var(--down-color)':'var(--flat-color)';
     document.getElementById('mAmt').textContent='总成交 '+(b.total_amount||'--')+' 亿';
-    renderTable('gainersBody',d.gainers);renderTable('losersBody',d.losers);
+    renderTable('gainersBody',d.gainers.slice(0,topN));renderTable('losersBody',d.losers.slice(0,topN));
     renderTable('limitUpBody',d.limit_ups);renderTable('limitDownBody',d.limit_downs);
-    renderTurnover(d.turnover);
+    renderTurnover(d.turnover.slice(0,turnoverTopN));
     if(d.gainers&&d.gainers.length){const top=d.gainers[0].code;if(prevGainer&&prevGainer!==top){const row=document.querySelector('#gainersBody tr');if(row){row.classList.add('data-row-flash');setTimeout(()=>row.classList.remove('data-row-flash'),600)}}prevGainer=top}
 }
 

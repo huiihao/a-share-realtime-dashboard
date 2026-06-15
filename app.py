@@ -254,8 +254,8 @@ def full_snapshot():
             'total_amount': round(total_amt / 1e8, 0),
         }
 
-        result['limit_ups'] = limit_up_stocks[:top_n]
-        result['limit_downs'] = limit_down_stocks[:top_n]
+        result['limit_ups'] = limit_up_stocks  # 全部涨停
+        result['limit_downs'] = limit_down_stocks  # 全部跌停
         result['gainers'] = sorted(normal, key=lambda x: x['change_pct'] or 0, reverse=True)[:top_n]
         result['losers'] = sorted(normal, key=lambda x: x['change_pct'] or 0)[:top_n]
         result['turnover'] = sorted(valid, key=lambda x: x.get('amount', 0) or 0, reverse=True)[:top_n]
