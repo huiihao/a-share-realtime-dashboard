@@ -145,14 +145,14 @@ def fetch_indices():
         return []
 
 def fetch_sectors():
-    """获取行业板块行情 - 使用东方财富板块API"""
+    """获取行业板块行情 - 东方财富API，失败则返回None"""
     try:
         url = "https://push2.eastmoney.com/api/qt/clist/get"
         params = {
             "pn": "1", "pz": "30", "po": "1", "np": "1",
             "ut": "bd1d9ddb04089700cf9ecc5dd0f0b4a1",
             "fltt": "2", "invt": "2", "fid": "f3",
-            "fs": "m:90+t:2",  # 行业板块
+            "fs": "m:90+t:2",
             "fields": "f2,f3,f4,f12,f14",
             "_": str(int(time.time() * 1000))
         }
@@ -167,7 +167,32 @@ def fetch_sectors():
             } for item in data["data"]["diff"]]
     except Exception as e:
         print(f"Sector error: {e}")
-    return []
+    return None
+
+def compute_segments(rows):
+    """从股票数据中计算市场分段表现（作为板块的可靠回退）"""
+    if not rows:
+        return []
+
+    segments = {
+        '沪市主板': lambda c: c.startswith('sh6'),
+        '深市主板': lambda c: c.startswith('sz0') and not c.startswith('sz00'),
+        '创业板':   lambda c: c.startswith('sz30'),
+        '科创板':   lambda c: c.startswith('sh68'),
+        '中小板':   lambda c: c.startswith('sz00'),
+        '北交所':   lambda c: c.startswith('bj'),
+    }
+
+    result = []
+    for name, pred in segments.items():
+        group = [r for r in rows if pred(r['code'])]
+        if group:
+            avg_pct = sum(r['change_pct'] for r in group) / len(group)
+            result.append({'name': f'{name}({len(group)})', 'change_pct': round(avg_pct, 2)})
+
+    # Sort by change_pct desc
+    result.sort(key=lambda x: x['change_pct'], reverse=True)
+    return result
 
 def is_market_open():
     now = datetime.now()
@@ -266,19 +291,26 @@ def full_snapshot():
     return jsonify(result)
 
 @app.route('/api/sectors')
-@cache.cached(timeout=300, query_string=True)
+@cache.cached(timeout=60, query_string=True)
 def sectors():
-    """行业板块 - 独立端点，缓存5分钟"""
-    try:
-        data = fetch_sectors()
-        return jsonify({
-            'time': datetime.now().strftime('%H:%M:%S'),
-            'sectors': data,
-            'source': 'eastmoney'
-        })
-    except Exception as e:
-        print(f"Sectors endpoint error: {e}")
-        return jsonify({'sectors': [], 'source': 'unavailable'})
+    """行业板块 - 东方财富API，失败则从股票数据中计算市场分段"""
+    result = {'time': datetime.now().strftime('%H:%M:%S'), 'sectors': [], 'source': 'computed'}
+
+    # Try Eastmoney first
+    em_data = fetch_sectors()
+    if em_data:
+        result['sectors'] = em_data
+        result['source'] = 'eastmoney'
+        return jsonify(result)
+
+    # Fallback: compute from stock data
+    rows = fetch_all_stocks()
+    if rows:
+        valid = [r for r in rows if -99 < (r['change_pct'] or 0) < 99]
+        result['sectors'] = compute_segments(valid)
+        result['source'] = 'computed'
+
+    return jsonify(result)
 
 
 if __name__ == '__main__':
