@@ -145,54 +145,96 @@ def fetch_indices():
         return []
 
 def fetch_sectors():
-    """获取行业板块行情 - 东方财富API，失败则返回None"""
-    try:
-        url = "https://push2.eastmoney.com/api/qt/clist/get"
-        params = {
-            "pn": "1", "pz": "30", "po": "1", "np": "1",
-            "ut": "bd1d9ddb04089700cf9ecc5dd0f0b4a1",
-            "fltt": "2", "invt": "2", "fid": "f3",
-            "fs": "m:90+t:2",
-            "fields": "f2,f3,f4,f12,f14",
-            "_": str(int(time.time() * 1000))
-        }
-        resp = requests.get(url, params=params,
-                          headers={"User-Agent": "Mozilla/5.0", "Referer": "https://quote.eastmoney.com/"},
-                          timeout=10)
-        data = resp.json()
-        if data.get("data") and data["data"].get("diff"):
-            return [{
-                'name': str(item.get('f14', '')),
-                'change_pct': item.get('f3', 0) or 0,
-            } for item in data["data"]["diff"]]
-    except Exception as e:
-        print(f"Sector error: {e}")
+    """获取行业板块行情 - 东方财富API，带重试，禁用代理"""
+    url = "https://push2.eastmoney.com/api/qt/clist/get"
+    params = {
+        "pn": "1", "pz": "30", "po": "1", "np": "1",
+        "ut": "bd1d9ddb04089700cf9ecc5dd0f0b4a1",
+        "fltt": "2", "invt": "2", "fid": "f3",
+        "fs": "m:90+t:2",
+        "fields": "f2,f3,f4,f12,f14",
+        "_": str(int(time.time() * 1000))
+    }
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+               "Referer": "https://quote.eastmoney.com/"}
+
+    for attempt in range(3):
+        try:
+            resp = requests.get(url, params=params, headers=headers,
+                              timeout=15, proxies={"http": None, "https": None})
+            data = resp.json()
+            if data.get("data") and data["data"].get("diff"):
+                return [{
+                    'name': str(item.get('f14', '')),
+                    'change_pct': item.get('f3', 0) or 0,
+                } for item in data["data"]["diff"]]
+            return None
+        except Exception as e:
+            if attempt < 2:
+                time.sleep(2)
+            else:
+                print(f"Sector error (retries exhausted): {e}")
     return None
 
-def compute_segments(rows):
-    """从股票数据中计算市场分段表现（作为板块的可靠回退）"""
-    if not rows:
+# 同花顺行业代码 → 名称映射（从本地 industry.ini 提取）
+THS_INDUSTRY_NAMES = {
+    "881101": "种植业", "881102": "养殖业", "881103": "饲料", "881105": "煤炭开采",
+    "881107": "油气开采", "881108": "石油化工", "881109": "化学原料", "881112": "钢铁",
+    "881114": "稀土", "881115": "有色金属", "881116": "建筑材料", "881117": "通用设备",
+    "881118": "专用设备", "881121": "半导体", "881122": "消费电子", "881123": "电子制造",
+    "881124": "通信设备", "881125": "汽车整车", "881126": "汽车零部件",
+    "881128": "白色家电", "881129": "视听器材", "881131": "食品加工", "881132": "白酒",
+    "881134": "生物制品", "881135": "化学制药", "881136": "中药", "881138": "医疗器械",
+    "881140": "电力", "881142": "电网", "881144": "环保", "881146": "光伏",
+    "881148": "风电", "881150": "锂电池", "881152": "军工", "881154": "工程机械",
+    "881156": "房地产", "881158": "银行", "881160": "证券", "881162": "保险",
+    "881164": "传媒", "881166": "通信服务", "881168": "计算机应用", "881170": "软件开发",
+    "881172": "IT服务", "881174": "物流", "881176": "商业零售", "881178": "旅游",
+    "881180": "航空运输", "881182": "港口航运", "881184": "纺织服装",
+}
+
+def load_industry_mapping():
+    """从同花顺本地 industry.ini 加载行业→股票映射"""
+    ini_path = r"C:\同花顺软件\同花顺\industry.ini"
+    if not os.path.exists(ini_path):
+        return {}
+    mapping = {}
+    with open(ini_path, "r", encoding="gbk", errors="ignore") as f:
+        for line in f:
+            line = line.strip()
+            if not line or '=' not in line or line.startswith('['):
+                continue
+            code, stocks = line.split('=', 1)
+            # 跳过名称行（以;结尾）和未知行业
+            if stocks.endswith(';') or code not in THS_INDUSTRY_NAMES:
+                continue
+            mapping[code] = [s.strip() for s in stocks.split(',') if s.strip()]
+    return mapping
+
+def compute_industry_performance(rows):
+    """从实时股票数据 + 本地行业分类计算行业表现"""
+    industry_map = load_industry_mapping()
+    if not industry_map:
         return []
 
-    segments = {
-        '沪市主板': lambda c: c.startswith('sh6'),
-        '深市主板': lambda c: c.startswith('sz0') and not c.startswith('sz00'),
-        '创业板':   lambda c: c.startswith('sz30'),
-        '科创板':   lambda c: c.startswith('sh68'),
-        '中小板':   lambda c: c.startswith('sz00'),
-        '北交所':   lambda c: c.startswith('bj'),
-    }
+    # 构建代码→涨跌幅的查找表（新浪格式 sh600xxx vs 同花顺格式 600xxx）
+    price_map = {}
+    for r in rows:
+        code = r['code'].replace('sh', '').replace('sz', '').replace('bj', '')
+        price_map[code] = r['change_pct']
 
-    result = []
-    for name, pred in segments.items():
-        group = [r for r in rows if pred(r['code'])]
-        if group:
-            avg_pct = sum(r['change_pct'] for r in group) / len(group)
-            result.append({'name': f'{name}({len(group)})', 'change_pct': round(avg_pct, 2)})
+    results = []
+    for ind_code, stock_list in industry_map.items():
+        pcts = [price_map[s] for s in stock_list if s in price_map]
+        if len(pcts) >= 3:  # 至少3只股票有数据
+            avg_pct = sum(pcts) / len(pcts)
+            results.append({
+                'name': THS_INDUSTRY_NAMES.get(ind_code, ind_code),
+                'change_pct': round(avg_pct, 2),
+            })
 
-    # Sort by change_pct desc
-    result.sort(key=lambda x: x['change_pct'], reverse=True)
-    return result
+    results.sort(key=lambda x: x['change_pct'], reverse=True)
+    return results[:30]
 
 def is_market_open():
     now = datetime.now()
@@ -313,13 +355,21 @@ def full_snapshot():
 @app.route('/api/sectors')
 @cache.cached(timeout=60, query_string=True)
 def sectors():
-    """行业板块 - 东方财富API，失败返回空（由前端显示不可用）"""
+    """行业板块 - 优先东方财富API，回退到本地同花顺行业分类"""
+    # 尝试东方财富
     em_data = fetch_sectors()
-    return jsonify({
-        'time': datetime.now().strftime('%H:%M:%S'),
-        'sectors': em_data or [],
-        'source': 'eastmoney' if em_data else 'unavailable'
-    })
+    if em_data:
+        return jsonify({'time': datetime.now().strftime('%H:%M:%S'), 'sectors': em_data, 'source': 'eastmoney'})
+
+    # 回退：从股票数据 + 本地 industry.ini 计算
+    rows = fetch_all_stocks()
+    if rows:
+        valid = [r for r in rows if -99 < (r['change_pct'] or 0) < 99]
+        local_sectors = compute_industry_performance(valid)
+        if local_sectors:
+            return jsonify({'time': datetime.now().strftime('%H:%M:%S'), 'sectors': local_sectors, 'source': 'local'})
+
+    return jsonify({'time': datetime.now().strftime('%H:%M:%S'), 'sectors': [], 'source': 'unavailable'})
 
 @app.route('/api/board_performance')
 def board_performance():

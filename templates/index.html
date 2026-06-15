@@ -159,7 +159,7 @@
     <!-- Gainers + Losers (excl. limit) -->
     <div class="panels-grid">
         <div class="panel"><div class="panel-header"><span>涨幅榜 <span style="color:var(--rise);font-size:10px;font-weight:400">不含涨停</span></span><div class="panel-header-right"><select id="topSelect" onchange="onTopChange()"><option value="20">TOP 20</option><option value="50">TOP 50</option><option value="100">TOP 100</option></select></div></div><div class="panel-body max-440"><table><thead><tr><th>代码</th><th>名称</th><th>最新价</th><th>涨跌幅</th></tr></thead><tbody id="gainersBody"><tr><td colspan="4"><div class="empty-state">加载中...</div></td></tr></tbody></table></div></div>
-        <div class="panel"><div class="panel-header"><span>跌幅榜 <span style="color:var(--fall);font-size:10px;font-weight:400">不含跌停</span></span><div class="panel-header-right"><span style="font-size:10px;color:var(--text-tertiary)">与涨幅榜同步</span></div></div><div class="panel-body max-440"><table><thead><tr><th>代码</th><th>名称</th><th>最新价</th><th>涨跌幅</th></tr></thead><tbody id="losersBody"><tr><td colspan="4"><div class="empty-state">加载中...</div></td></tr></tbody></table></div></div>
+        <div class="panel"><div class="panel-header"><span>跌幅榜 <span style="color:var(--fall);font-size:10px;font-weight:400">不含跌停</span></span><div class="panel-header-right"><select id="topSelect2" onchange="onTopChange2()"><option value="20">TOP 20</option><option value="50">TOP 50</option><option value="100">TOP 100</option></select></div></div><div class="panel-body max-440"><table><thead><tr><th>代码</th><th>名称</th><th>最新价</th><th>涨跌幅</th></tr></thead><tbody id="losersBody"><tr><td colspan="4"><div class="empty-state">加载中...</div></td></tr></tbody></table></div></div>
     </div>
 
     <!-- Limit Up / Down (全部) -->
@@ -201,7 +201,8 @@ setInterval(tick,1000);tick();
 // ===== CONTROLS =====
 function onSourceChange(){source=document.getElementById('sourceSelect').value;fetchData()}
 function onRefreshChange(){refreshMs=parseInt(document.getElementById('refreshSelect').value)*1000;countdown=refreshMs/1000;if(intervalId)clearInterval(intervalId);intervalId=setInterval(fetchData,refreshMs)}
-function onTopChange(){topN=parseInt(document.getElementById('topSelect').value);fetchData()}
+function onTopChange(){topN=parseInt(document.getElementById('topSelect').value);document.getElementById('topSelect2').value=topN;fetchData()}
+function onTopChange2(){topN=parseInt(document.getElementById('topSelect2').value);document.getElementById('topSelect').value=topN;fetchData()}
 function onTurnoverChange(){turnoverTopN=parseInt(document.getElementById('turnoverTop').value);fetchData()}
 function onSectorIntervalChange(){sectorIntervalSec=parseInt(document.getElementById('sectorInterval').value);sectorCountdown=0;fetchSectors()}
 
@@ -241,7 +242,7 @@ function renderTurnover(rows){const t=document.getElementById('turnoverBody');if
 // ===== SECTORS (独立刷新) =====
 async function fetchSectors(){try{const r=await fetch('/api/sectors');const d=await r.json();document.getElementById('sectorTime').textContent=d.time;renderSectors(d.sectors);sectorCountdown=sectorIntervalSec;document.getElementById('sectorNext').textContent=sectorCountdown;scheduleSectors()}catch(e){console.error('Sectors:',e);sectorCountdown=30;scheduleSectors()}}
 function scheduleSectors(){if(sectorTimeoutId)clearTimeout(sectorTimeoutId);sectorTimeoutId=setTimeout(()=>fetchSectors(),sectorIntervalSec*1000)}
-function renderSectors(rows){const t=document.getElementById('sectorsBody');if(!rows||!rows.length){t.innerHTML='<div class="empty-state">板块数据不可用 · 30秒后重试</div>';return}const max=Math.max(...rows.map(r=>Math.abs(r.change_pct||0)),1);t.innerHTML=rows.map(r=>{const cls=pcls(r.change_pct),w=(Math.abs(r.change_pct||0)/max*100).toFixed(0);return`<div class="sector-row"><span class="sector-name">${(r.name||'').substring(0,14)}</span><div class="sector-bar-wrap"><div class="sector-bar ${cls}" style="width:${w}%"></div></div><span class="sector-pct ${cls}">${pct(r.change_pct)}</span></div>`}).join('')}
+function renderSectors(rows){const t=document.getElementById('sectorsBody');if(!rows||!rows.length){t.innerHTML='<div class="empty-state">加载行业数据...</div>';return}const max=Math.max(...rows.map(r=>Math.abs(r.change_pct||0)),1);t.innerHTML=rows.map(r=>{const cls=pcls(r.change_pct),w=(Math.abs(r.change_pct||0)/max*100).toFixed(0);return`<div class="sector-row"><span class="sector-name">${(r.name||'').substring(0,14)}</span><div class="sector-bar-wrap"><div class="sector-bar ${cls}" style="width:${w}%"></div></div><span class="sector-pct ${cls}">${pct(r.change_pct)}</span></div>`}).join('')}
 
 // ===== INIT =====
 fetchData();intervalId=setInterval(fetchData,refreshMs);
