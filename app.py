@@ -229,6 +229,7 @@ def full_snapshot():
         'time': datetime.now().strftime('%H:%M:%S'),
         'market_open': is_market_open(),
         'indices': [],
+        'boards': [],
         'breadth': {},
         'gainers': [],
         'losers': [],
@@ -285,6 +286,25 @@ def full_snapshot():
         result['losers'] = sorted(normal, key=lambda x: x['change_pct'] or 0)[:top_n]
         result['turnover'] = sorted(valid, key=lambda x: x.get('amount', 0) or 0, reverse=True)[:top_n]
 
+        # 市场分段 (沪市主板/创业板/科创板等)
+        boards_def = [
+            ('沪市主板', lambda c: c.startswith('sh60')),
+            ('科创板',   lambda c: c.startswith('sh68')),
+            ('深市主板', lambda c: c.startswith('sz000') or c.startswith('sz001')),
+            ('中小板',   lambda c: c.startswith('sz002')),
+            ('创业板',   lambda c: c.startswith('sz30')),
+            ('北交所',   lambda c: c.startswith('bj')),
+        ]
+        result['boards'] = []
+        for bname, pred in boards_def:
+            group = [r for r in valid if pred(r['code'])]
+            if group:
+                avg_pct = sum(r['change_pct'] for r in group) / len(group)
+                result['boards'].append({
+                    'name': bname, 'count': len(group),
+                    'avg_pct': round(avg_pct, 2),
+                })
+
     elapsed = time.time() - start
     print(f"Snapshot: {len(rows)} stocks in {elapsed:.1f}s (top_n={top_n})")
 
@@ -293,24 +313,49 @@ def full_snapshot():
 @app.route('/api/sectors')
 @cache.cached(timeout=60, query_string=True)
 def sectors():
-    """行业板块 - 东方财富API，失败则从股票数据中计算市场分段"""
-    result = {'time': datetime.now().strftime('%H:%M:%S'), 'sectors': [], 'source': 'computed'}
-
-    # Try Eastmoney first
+    """行业板块 - 东方财富API，失败返回空（由前端显示不可用）"""
     em_data = fetch_sectors()
-    if em_data:
-        result['sectors'] = em_data
-        result['source'] = 'eastmoney'
-        return jsonify(result)
+    return jsonify({
+        'time': datetime.now().strftime('%H:%M:%S'),
+        'sectors': em_data or [],
+        'source': 'eastmoney' if em_data else 'unavailable'
+    })
 
-    # Fallback: compute from stock data
+@app.route('/api/board_performance')
+def board_performance():
+    """市场分段表现 - 从已加载的股票数据计算，无外部依赖"""
     rows = fetch_all_stocks()
-    if rows:
-        valid = [r for r in rows if -99 < (r['change_pct'] or 0) < 99]
-        result['sectors'] = compute_segments(valid)
-        result['source'] = 'computed'
+    if not rows:
+        return jsonify({'boards': []})
 
-    return jsonify(result)
+    valid = [r for r in rows if -99 < (r['change_pct'] or 0) < 99]
+
+    boards_def = [
+        ('沪市主板', lambda c: c.startswith('sh60')),
+        ('深市主板', lambda c: c.startswith('sz0') and not c.startswith('sz00')),
+        ('创业板',   lambda c: c.startswith('sz30')),
+        ('科创板',   lambda c: c.startswith('sh68')),
+        ('中小板',   lambda c: c.startswith('sz00')),
+        ('北交所',   lambda c: c.startswith('bj')),
+    ]
+
+    boards = []
+    for name, pred in boards_def:
+        group = [r for r in valid if pred(r['code'])]
+        if group:
+            avg_pct = sum(r['change_pct'] for r in group) / len(group)
+            up = sum(1 for r in group if r['change_pct'] > 0)
+            down = sum(1 for r in group if r['change_pct'] < 0)
+            boards.append({
+                'name': name,
+                'count': len(group),
+                'avg_pct': round(avg_pct, 2),
+                'up': up,
+                'down': down,
+            })
+
+    boards.sort(key=lambda x: x['avg_pct'], reverse=True)
+    return jsonify({'boards': boards, 'time': datetime.now().strftime('%H:%M:%S')})
 
 
 if __name__ == '__main__':
