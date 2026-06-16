@@ -145,8 +145,14 @@ def fetch_indices():
         return []
 
 def fetch_sectors():
-    """获取行业板块行情 - 东方财富API，带重试，禁用代理"""
-    url = "https://push2.eastmoney.com/api/qt/clist/get"
+    """获取行业板块行情 - 东方财富API，带重试，多终端尝试"""
+    # 尝试不同的东方财富CDN节点
+    hosts = [
+        "https://push2.eastmoney.com",
+        "https://push2his.eastmoney.com",
+        "https://80.push2.eastmoney.com",
+        "https://17.push2.eastmoney.com",
+    ]
     params = {
         "pn": "1", "pz": "30", "po": "1", "np": "1",
         "ut": "bd1d9ddb04089700cf9ecc5dd0f0b4a1",
@@ -158,22 +164,21 @@ def fetch_sectors():
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
                "Referer": "https://quote.eastmoney.com/"}
 
-    for attempt in range(3):
-        try:
-            resp = requests.get(url, params=params, headers=headers,
-                              timeout=15, proxies={"http": None, "https": None})
-            data = resp.json()
-            if data.get("data") and data["data"].get("diff"):
-                return [{
-                    'name': str(item.get('f14', '')),
-                    'change_pct': item.get('f3', 0) or 0,
-                } for item in data["data"]["diff"]]
-            return None
-        except Exception as e:
-            if attempt < 2:
-                time.sleep(2)
-            else:
-                print(f"Sector error (retries exhausted): {e}")
+    for host in hosts:
+        for attempt in range(2):
+            try:
+                url = f"{host}/api/qt/clist/get"
+                resp = requests.get(url, params=params, headers=headers,
+                                  timeout=8, proxies={"http": None, "https": None})
+                data = resp.json()
+                if data.get("data") and data["data"].get("diff"):
+                    return [{
+                        'name': str(item.get('f14', '')),
+                        'change_pct': item.get('f3', 0) or 0,
+                    } for item in data["data"]["diff"]]
+            except Exception:
+                if attempt == 0:
+                    time.sleep(1)
     return None
 
 # 同花顺行业代码 → 名称映射（从本地 industry.ini 提取）
@@ -369,9 +374,10 @@ def full_snapshot():
     return jsonify(result)
 
 @app.route('/api/sectors')
-@cache.cached(timeout=60, query_string=True)
 def sectors():
     """行业板块 - 优先东方财富API，回退到本地同花顺行业分类"""
+    force = request.args.get('force', '0') == '1'
+
     # 尝试东方财富
     em_data = fetch_sectors()
     if em_data:
