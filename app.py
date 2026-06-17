@@ -108,7 +108,9 @@ def fetch_all_stocks():
     return all_results
 
 def fetch_indices():
-    """获取主要指数行情"""
+    """获取主要指数行情
+    Sina指数格式与股票相同: fields[0]=名称, [1]=今开, [2]=昨收, [3]=最新价, [4]=最高, [5]=最低
+    """
     idx_codes = [c for c, _ in INDICES]
     url = SINA_URL + ','.join(idx_codes)
     try:
@@ -122,14 +124,13 @@ def fetch_indices():
                 continue
             code_part, data_part = line.split('=', 1)
             code = code_part.split('_')[-1].strip()
-            # Remove var prefix and trailing semicolon/quotes
             data_part = data_part.strip().strip('"').strip(';').strip('"')
             fields = data_part.split(',')
-            if len(fields) < 5:
+            if len(fields) < 6:
                 continue
             try:
-                price = float(fields[1]) if fields[1] else 0
-                prev_close = float(fields[2]) if fields[2] else 0
+                price = float(fields[3]) if fields[3] else 0       # 最新价 (不是今开!)
+                prev_close = float(fields[2]) if fields[2] else 0  # 昨收
                 change_pct = (price - prev_close) / prev_close * 100 if prev_close > 0 else 0
                 results.append({
                     'code': code,
